@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kalp Patlat — Basit</title>
+  <style>
+    html, body { margin:0; height:100%; overflow:hidden; background:#050611; }
+    canvas { display:block; width:100vw; height:100vh; touch-action:none; }
+    .hint{
+      position:fixed; left:12px; bottom:12px;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:rgba(255,255,255,.75);
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:14px;
+      padding:10px 12px;
+      user-select:none;
+      backdrop-filter: blur(8px);
+    }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">Tıkla / basılı tut: ❤️ kalpler patlasın (otomatik de patlıyor)</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha:false });
+
+  let W=0, H=0, DPR=1;
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    W = Math.floor(innerWidth * DPR);
+    H = Math.floor(innerHeight * DPR);
+    canvas.width = W;
+    canvas.height = H;
+  }
+  addEventListener("resize", resize, {passive:true});
+  resize();
+
+  const TAU = Math.PI*2;
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const hsla=(h,s,l,a)=>`hsla(${h}deg, ${s}%, ${l}%, ${a})`;
+
+  // arka plan yıldızları
+  const bgStars = Array.from({length:160}, ()=>({x:Math.random(), y:Math.random(), r:rand(0.6,1.8), p:rand(0,TAU), s:rand(0.002,0.010)}));
+
+  // parçacıklar
+  let particles = [];
+  const CAP = 5000;
+
+  function addParticle(p){
+    particles.push(p);
+    if(particles.length > CAP){
+      particles.splice(0, particles.length - CAP);
+    }
+  }
+
+  function makeParticle(x,y,vx,vy,hue){
+    return {
+      x,y,vx,vy,hue,
+      life:0, ttl: rand(700, 1500),
+      drag: rand(0.972, 0.990),
+      g: rand(0.010, 0.022) * DPR,
+      size: rand(1.4, 2.6) * DPR,
+      tw: Math.random() < 0.4
+    };
+  }
+
+  // ❤️ kalp şekilli patlama
+  function burstHeart(x,y,hue,power){
+    const n = Math.floor(rand(90, 150));
+    for(let i=0;i<n;i++){
+      const t = (i/n) * TAU;
+      const hx = 16*Math.pow(Math.sin(t),3);
+      const hy = 13*Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t);
+      const vx = (hx/16) * power * rand(0.8,1.15);
+      const vy = (-hy/16) * power * rand(0.8,1.15);
+      addParticle(makeParticle(x,y,vx,vy,hue+rand(-10,10)));
+    }
+  }
+
+  function pop(x,y){
+    const hue = rand(330, 360); // pembe/kırmızı tonlar
+    const power = rand(3.0, 6.0) * DPR;
+    burstHeart(x,y,hue,power);
+  }
+
+  // pointer (tık + basılı tut)
+  let holding=false, px=W*0.5, py=H*0.6, acc=0;
+
+  function toCanvasPos(e){
+    const r = canvas.getBoundingClientRect();
+    return { x:(e.clientX - r.left)*DPR, y:(e.clientY - r.top)*DPR };
+  }
+
+  canvas.addEventListener("pointerdown", (e)=>{
+    canvas.setPointerCapture(e.pointerId);
+    holding=true;
+    const p=toCanvasPos(e);
+    px=p.x; py=p.y;
+    pop(px,py);
+  }, {passive:true});
+
+  canvas.addEventListener("pointermove", (e)=>{
+    const p=toCanvasPos(e);
+    px=p.x; py=p.y;
+  }, {passive:true});
+
+  canvas.addEventListener("pointerup", ()=>holding=false, {passive:true});
+  canvas.addEventListener("pointercancel", ()=>holding=false, {passive:true});
+
+  // otomatik patlamalar
+  let autoT = 0;
+
+  // ana döngü
+  let last = performance.now();
+  function tick(now){
+    const dt = clamp(now-last, 0, 34);
+    last = now;
+
+    ctx.fillStyle = "#050611";
+    ctx.fillRect(0,0,W,H);
+
+    for(const s of bgStars){
+      s.p += s.s * dt;
+      const a = 0.18 + 0.28*Math.sin(s.p);
+      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(s.x*W, s.y*H, s.r*DPR, 0, TAU);
+      ctx.fill();
+    }
+
+    // otomatik kalpler
+    autoT += dt;
+    if(autoT > 420){
+      autoT = 0;
+      pop(rand(0.15*W, 0.85*W), rand(0.15*H, 0.75*H));
+    }
+
+    // basılı tutunca seri kalp
+    if(holding){
+      acc += dt;
+      while(acc > 80){
+        acc -= 80;
+        pop(px + rand(-10,10)*DPR, py + rand(-10,10)*DPR);
+      }
+    } else acc = 0;
+
+    // parçacıkları çiz
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.life += dt;
+      if(p.life >= p.ttl){ particles.splice(i,1); continue; }
+
+      const t = p.life / p.ttl;
+      p.vx *= p.drag;
+      p.vy *= p.drag;
+      p.vy += p.g;
+      p.x += p.vx * (dt/16);
+      p.y += p.vy * (dt/16);
+
+      const tw = p.tw ? (0.6 + 0.4*Math.sin(p.life/80 + p.hue)) : 1;
+      const a = (1 - t) * tw;
+      const l = 70 - 30*t;
+
+      ctx.fillStyle = hsla(p.hue, 90, l, a);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size*(0.9 + 0.6*(1-t)), 0, TAU);
+      ctx.fill();
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  // başlangıç patlamaları
+  for(let i=0;i<4;i++) pop(rand(0.2*W,0.8*W), rand(0.2*H,0.6*H));
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
